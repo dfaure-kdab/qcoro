@@ -20,19 +20,35 @@ inline bool TaskFinalSuspend::await_ready() const noexcept {
     return false;
 }
 
+namespace {
+
+bool hasExpiredGuardedThis(QCoro::detail::TaskPromiseBase &promise) {
+    if (auto features = promise.features(); features) {
+        const auto &guardedThis = features->guardedThis();
+        // We have a QPointer but it's null which means that the observed QObject has been destroyed.
+        return guardedThis.has_value() && guardedThis->isNull();
+    }
+    return false;
+}
+
+} // namespace
+
 template<typename Promise>
 inline void TaskFinalSuspend::await_suspend(std::coroutine_handle<Promise> finishedCoroutine) noexcept {
-    auto &promise = finishedCoroutine.promise();
-
+    auto &finishedPromise = finishedCoroutine.promise();
     for (auto &awaiter : mAwaitingCoroutines) {
-        awaiter.resume();
+        auto handle = std::coroutine_handle<TaskPromiseBase>::from_address(awaiter.address());
+        auto &awaitingPromise = handle.promise();
+        if (hasExpiredGuardedThis(awaitingPromise)) {
+            awaitingPromise.derefCoroutine();
+        } else {
+            awaiter.resume();
+        }
     }
     mAwaitingCoroutines.clear();
 
     // The handle will be destroyed here only if the associated Task has already been destroyed
-    if (promise.setDestroyHandle()) {
-        finishedCoroutine.destroy();
-    }
+    finishedPromise.derefCoroutine();
 }
 
 constexpr void TaskFinalSuspend::await_resume() const noexcept {}
