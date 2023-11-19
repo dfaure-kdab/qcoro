@@ -20,21 +20,17 @@ inline bool TaskFinalSuspend::await_ready() const noexcept {
     return false;
 }
 
-namespace {
-
-bool hasExpiredGuardedThis(QCoro::detail::TaskPromiseBase &promise) {
-    if (auto features = promise.features(); features) {
-        const auto &guardedThis = features->guardedThis();
-        // We have a QPointer but it's null which means that the observed QObject has been destroyed.
-        return guardedThis.has_value() && guardedThis->isNull();
-    }
-    return false;
-}
-
-} // namespace
-
 template<typename Promise>
 inline void TaskFinalSuspend::await_suspend(std::coroutine_handle<Promise> finishedCoroutine) noexcept {
+    const auto hasExpiredGuardedThis = [](const QCoro::detail::TaskPromiseBase &promise) {
+        if (const auto features = promise.features(); features) {
+            const auto &guardedThis = features->guardedThis();
+            // We have a QPointer but it's null which means that the observed QObject has been destroyed.
+            return guardedThis.has_value() && guardedThis->isNull();
+        }
+        return false;
+    };
+
     auto &finishedPromise = finishedCoroutine.promise();
     for (auto &awaiter : mAwaitingCoroutines) {
         auto handle = std::coroutine_handle<TaskPromiseBase>::from_address(awaiter.address());
